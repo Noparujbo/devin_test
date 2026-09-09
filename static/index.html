@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shortly — URL Shortener</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: radial-gradient(1000px 600px at 15% -10%, #1e293b, #0b1120 60%); color: #e2e8f0;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.5px; }
+  p.sub { margin: 0 0 28px; color: #94a3b8; }
+  .card { background: #0f172acc; border: 1px solid #1e293b; border-radius: 14px; padding: 20px; box-shadow: 0 12px 40px #0006; }
+  form { display: flex; flex-wrap: wrap; gap: 10px; }
+  input {
+    flex: 1 1 320px; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid #334155;
+    background: #0b1220; color: #e2e8f0; font-size: 15px;
+  }
+  input#code { flex: 0 1 190px; }
+  input:focus { outline: 2px solid #38bdf8; outline-offset: 1px; }
+  button {
+    padding: 12px 20px; border-radius: 10px; border: 0; background: #38bdf8; color: #04263a;
+    font-weight: 650; font-size: 15px; cursor: pointer;
+  }
+  button:hover { background: #7dd3fc; }
+  button.ghost { background: transparent; color: #94a3b8; border: 1px solid #334155; padding: 6px 10px; font-size: 13px; font-weight: 500; }
+  button.ghost:hover { color: #e2e8f0; border-color: #64748b; background: transparent; }
+  .msg { margin-top: 12px; font-size: 14px; min-height: 20px; }
+  .msg.err { color: #fca5a5; }
+  .msg.ok { color: #86efac; }
+  h2 { font-size: 18px; margin: 36px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: #94a3b8; font-weight: 550; padding: 10px 12px; border-bottom: 1px solid #1e293b; white-space: nowrap; }
+  td { padding: 12px; border-bottom: 1px solid #16202e; vertical-align: top; }
+  td.long { max-width: 320px; overflow-wrap: anywhere; color: #cbd5e1; }
+  a { color: #7dd3fc; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .count { display: inline-block; min-width: 34px; text-align: center; padding: 3px 8px; border-radius: 999px; background: #1e293b; font-variant-numeric: tabular-nums; }
+  .muted { color: #64748b; }
+  .empty { padding: 26px 12px; text-align: center; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Shortly</h1>
+  <p class="sub">Shorten a URL, share it, and watch the clicks roll in.</p>
+
+  <div class="card">
+    <form id="form">
+      <input id="url" type="text" placeholder="https://example.com/a/very/long/link" autocomplete="off" required />
+      <input id="code" type="text" placeholder="custom code (optional)" autocomplete="off" />
+      <button type="submit">Shorten</button>
+    </form>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <h2>Your links</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Short URL</th><th>Original</th><th>Clicks</th><th>Last click</th><th>Created</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No links yet — shorten one above.</div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function fmt(ts) {
+  if (!ts) return '<span class="muted">never</span>';
+  return new Date(ts).toLocaleString();
+}
+
+async function load() {
+  const res = await fetch('/api/links');
+  const { links } = await res.json();
+  const rows = $('rows');
+  rows.innerHTML = '';
+  $('empty').hidden = links.length > 0;
+  for (const link of links) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><a href="${link.short_url}" target="_blank" rel="noopener">/${link.code}</a></td>
+      <td class="long"><a href="${link.long_url}" target="_blank" rel="noopener noreferrer">${link.long_url}</a></td>
+      <td><span class="count">${link.click_count}</span></td>
+      <td>${fmt(link.last_clicked_at)}</td>
+      <td>${fmt(link.created_at)}</td>
+      <td style="white-space:nowrap">
+        <button class="ghost" data-copy="${link.short_url}">Copy</button>
+        <button class="ghost" data-del="${link.code}">Delete</button>
+      </td>`;
+    rows.appendChild(tr);
+  }
+}
+
+function say(text, kind) {
+  const msg = $('msg');
+  msg.textContent = text;
+  msg.className = 'msg ' + (kind || '');
+}
+
+$('form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  say('');
+  const res = await fetch('/api/shorten', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: $('url').value, custom_code: $('code').value || null }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const detail = data.detail;
+    say(typeof detail === 'string' ? detail : (detail?.[0]?.msg ?? 'Something went wrong'), 'err');
+    return;
+  }
+  $('url').value = '';
+  $('code').value = '';
+  say('Created ' + data.short_url, 'ok');
+  load();
+});
+
+$('rows').addEventListener('click', async (event) => {
+  const copy = event.target.dataset.copy;
+  const del = event.target.dataset.del;
+  if (copy) {
+    await navigator.clipboard.writeText(copy);
+    say('Copied ' + copy, 'ok');
+  } else if (del) {
+    await fetch('/api/links/' + encodeURIComponent(del), { method: 'DELETE' });
+    load();
+  }
+});
+
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>

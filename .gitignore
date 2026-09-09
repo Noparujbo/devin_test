@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+urls.db*
+.pytest_cache/
+node_modules/
+package-lock.json
