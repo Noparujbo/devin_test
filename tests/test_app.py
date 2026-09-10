@@ -50,3 +50,22 @@ def test_delete_link(client):
     code = client.post("/api/shorten", json={"url": "https://a.dev"}).json()["code"]
     assert client.delete(f"/api/links/{code}").status_code == 200
     assert client.get("/api/links").json()["links"] == []
+
+
+def test_deleting_link_row_cascades_clicks(client):
+    import app.db
+
+    created = client.post("/api/shorten", json={"url": "https://a.dev"}).json()
+    code = created["code"]
+    assert client.get(f"/{code}", follow_redirects=False).status_code == 307
+
+    with app.db.get_conn() as conn:
+        click_count = conn.execute(
+            "SELECT COUNT(*) FROM clicks WHERE code = ?", (code,)
+        ).fetchone()[0]
+        assert click_count == 1
+        conn.execute("DELETE FROM links WHERE code = ?", (code,))
+        remaining_clicks = conn.execute(
+            "SELECT COUNT(*) FROM clicks WHERE code = ?", (code,)
+        ).fetchone()[0]
+    assert remaining_clicks == 0
