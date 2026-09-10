@@ -16,6 +16,15 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
 
+@pytest.fixture()
+def db(tmp_path, monkeypatch):
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    import app.db
+    importlib.reload(app.db)
+    app.db.init_db()
+    yield app.db
+
+
 def test_shorten_and_redirect_tracks_clicks(client):
     created = client.post("/api/shorten", json={"url": "example.com/docs"}).json()
     assert created["long_url"] == "https://example.com/docs"
@@ -50,3 +59,40 @@ def test_delete_link(client):
     code = client.post("/api/shorten", json={"url": "https://a.dev"}).json()["code"]
     assert client.delete(f"/api/links/{code}").status_code == 200
     assert client.get("/api/links").json()["links"] == []
+
+
+def test_delete_link_cascades_to_clicks(db):
+    # Test database-level ON DELETE CASCADE by directly manipulating the database
+    # to bypass the manual cascade-delete logic in the API endpoint
+    with db.get_conn() as conn:
+        # Insert a link directly
+        code = "testcode123"
+        conn.execute(
+            "INSERT INTO links (code, long_url, created_at, click_count) VALUES (?, ?, ?, 0)",
+            (code, "https://example.com", "2024-01-01T00:00:00Z"),
+        )
+        
+        # Insert clicks directly
+        conn.execute(
+            "INSERT INTO clicks (code, clicked_at, referer, user_agent) VALUES (?, ?, ?, ?)",
+            (code, "2024-01-01T00:00:00Z", "https://google.com", "Mozilla/5.0"),
+        )
+        conn.execute(
+            "INSERT INTO clicks (code, clicked_at, referer, user_agent) VALUES (?, ?, ?, ?)",
+            (code, "2024-01-01T00:01:00Z", "https://twitter.com", "Mozilla/5.0"),
+        )
+        conn.execute(
+            "INSERT INTO clicks (code, clicked_at, referer, user_agent) VALUES (?, ?, ?, ?)",
+            (code, "2024-01-01T00:02:00Z", None, "Mozilla/5.0"),
+        )
+        
+        # Verify clicks exist
+        clicks_count = conn.execute("SELECT COUNT(*) FROM clicks WHERE code = ?", (code,)).fetchone()[0]
+        assert clicks_count == 3
+        
+        # Delete the link directly (bypassing API endpoint that has manual cascade)
+        conn.execute("DELETE FROM links WHERE code = ?", (code,))
+        
+        # Verify clicks are also deleted due to ON DELETE CASCADE
+        clicks_count_after = conn.execute("SELECT COUNT(*) FROM clicks WHERE code = ?", (code,)).fetchone()[0]
+        assert clicks_count_after == 0

@@ -134,7 +134,6 @@ def link_clicks(code: str, request: Request) -> dict:
 def delete_link(code: str) -> dict:
     with get_conn() as conn:
         cursor = conn.execute("DELETE FROM links WHERE code = ?", (code,))
-        conn.execute("DELETE FROM clicks WHERE code = ?", (code,))
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Short code not found")
     return {"deleted": code}
